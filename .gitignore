@@ -1,0 +1,21 @@
+#  App ignore
+downloads/
+yt_dlp_gui_config.json
+
+#  Venv ignore
+.venv/
+
+#  IDE ignore
+.vscode/
+.idea/
+.cursor/
+.cursorrules
+.cursorignore
+
+#  Python ignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
