@@ -6,12 +6,14 @@ import urllib.request
 import shutil
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QPushButton, QTextEdit, QLabel, QFileDialog, QCheckBox, QComboBox, QDialog
+    QLineEdit, QPushButton, QTextEdit, QLabel, QFileDialog, QCheckBox, QComboBox, QDialog, QMessageBox
 )
-from PySide6.QtCore import QSize, QThread, Signal, QObject
-from PySide6.QtGui import QPalette
+from PySide6.QtCore import QSize, QThread, Signal, QObject, QUrl
+from PySide6.QtGui import QPalette, QDesktopServices
 
-CONFIG_FILE = "yt_dlp_gui_config.json"
+CONFIG_FILE = "app_config.json"
+OPEN_FOLDER_DIALOG_TITLE = "Open folder"
+OPEN_LAST_SAVE_LOCATION_TEXT = "Open last save location"
 
 class DownloadWorker(QObject):
     output = Signal(str)
@@ -109,6 +111,7 @@ class YtDlpGui(QWidget):
         self.setMinimumWidth(500)
         self.video_dir = os.path.expanduser("~")  # Default to home directory
         self.audio_dir = os.path.expanduser("~")
+        self.last_save_dir = ""
         self.cookies_file_path = ""
         self.load_config()
 
@@ -184,21 +187,34 @@ class YtDlpGui(QWidget):
         self.status_display.setReadOnly(True)
         self.status_display.setPlaceholderText("Status and output will appear here...")
 
+        # Open last save location button (centered at bottom; enabled only after first save)
+        self.open_last_save_btn = QPushButton(OPEN_LAST_SAVE_LOCATION_TEXT)
+        self.open_last_save_btn.clicked.connect(lambda: self._open_directory_in_file_manager(self.last_save_dir))
+        self.open_last_save_btn.setToolTip("Open the folder used for the most recent download (default or custom).")
+
         # Video download directory label and button
         self.video_dir_label = QLabel(self.video_dir)
         self.video_dir_btn = QPushButton("Choose Video Directory")
         self.video_dir_btn.clicked.connect(self.choose_video_dir)
+        self.open_video_dir_btn = QPushButton("Open")
+        self.open_video_dir_btn.clicked.connect(lambda: self._open_directory_in_file_manager(self.video_dir))
+        self.open_video_dir_btn.setToolTip("Open the video download folder in your file manager (e.g., File Explorer).")
         video_dir_layout.addWidget(QLabel("Video to:"))
         video_dir_layout.addWidget(self.video_dir_label)
         video_dir_layout.addWidget(self.video_dir_btn)
+        video_dir_layout.addWidget(self.open_video_dir_btn)
 
         # Audio download directory label and button
         self.audio_dir_label = QLabel(self.audio_dir)
         self.audio_dir_btn = QPushButton("Choose Audio Directory")
         self.audio_dir_btn.clicked.connect(self.choose_audio_dir)
+        self.open_audio_dir_btn = QPushButton("Open")
+        self.open_audio_dir_btn.clicked.connect(lambda: self._open_directory_in_file_manager(self.audio_dir))
+        self.open_audio_dir_btn.setToolTip("Open the audio download folder in your file manager (e.g., File Explorer).")
         audio_dir_layout.addWidget(QLabel("Audio to:"))
         audio_dir_layout.addWidget(self.audio_dir_label)
         audio_dir_layout.addWidget(self.audio_dir_btn)
+        audio_dir_layout.addWidget(self.open_audio_dir_btn)
 
         # Check for updates and View README buttons
         self.check_updates_btn = QPushButton("Check for yt-dlp updates")
@@ -206,6 +222,8 @@ class YtDlpGui(QWidget):
         self.view_readme_btn = QPushButton("View README")
         self.view_readme_btn.clicked.connect(self.open_readme)
         updates_layout.addWidget(self.view_readme_btn)
+        updates_layout.addStretch()
+        updates_layout.addWidget(self.open_last_save_btn)
         updates_layout.addStretch()
         updates_layout.addWidget(self.check_updates_btn)
 
@@ -215,8 +233,8 @@ class YtDlpGui(QWidget):
 
         # Assemble layouts
         url_layout.addWidget(self.paste_btn)
-        url_layout.addWidget(self.url_input)
         url_layout.addWidget(self.download_btn)
+        url_layout.addWidget(self.url_input)
         main_layout.addLayout(url_layout)
         main_layout.addWidget(hint_label)
         main_layout.addWidget(self.audio_only_checkbox)
@@ -228,6 +246,9 @@ class YtDlpGui(QWidget):
         main_layout.addWidget(self.status_display)
         main_layout.addLayout(updates_layout)
         self.setLayout(main_layout)
+
+        # Apply initial enabled/disabled state for the last-save button
+        self._update_last_save_button_state()
 
         # Restore window size if available
         if hasattr(self, 'window_size'):
@@ -262,6 +283,22 @@ class YtDlpGui(QWidget):
         if dir_path:
             self.audio_dir = dir_path
             self.audio_dir_label.setText(self.audio_dir)
+
+    def _open_directory_in_file_manager(self, dir_path: str):
+        dir_path = (dir_path or "").strip()
+        if not dir_path:
+            QMessageBox.warning(self, OPEN_FOLDER_DIALOG_TITLE, "No folder is set.")
+            return
+        if not os.path.isdir(dir_path):
+            QMessageBox.warning(self, OPEN_FOLDER_DIALOG_TITLE, f"Folder does not exist:\n{dir_path}")
+            return
+        ok = QDesktopServices.openUrl(QUrl.fromLocalFile(dir_path))
+        if not ok:
+            QMessageBox.warning(self, OPEN_FOLDER_DIALOG_TITLE, f"Could not open folder:\n{dir_path}")
+
+    def _update_last_save_button_state(self):
+        enabled = bool((self.last_save_dir or "").strip()) and os.path.isdir(self.last_save_dir)
+        self.open_last_save_btn.setEnabled(enabled)
 
     def _resolve_download_dirs(self, audio_only: bool, video_dir: str, audio_dir: str, override_save: bool):
         if not override_save:
@@ -317,6 +354,9 @@ class YtDlpGui(QWidget):
         if video_dir is None and audio_dir is None:
             self.status_display.append("Download cancelled.")
             return
+        # Track the last save location (default or per-download override)
+        self.last_save_dir = audio_dir if audio_only else video_dir
+        self._update_last_save_button_state()
         cookies_browser, cookies_file = self._get_cookies_selection()
         self._start_worker(url, video_dir, audio_dir, audio_only, cookies_browser, cookies_file)
 
@@ -360,6 +400,7 @@ class YtDlpGui(QWidget):
                     config = json.load(f)
                 self.video_dir = config.get("video_dir", self.video_dir)
                 self.audio_dir = config.get("audio_dir", self.audio_dir)
+                self.last_save_dir = config.get("last_save_dir", self.last_save_dir)
                 self.window_size = config.get("window_size", None)
             except Exception:
                 pass
@@ -368,6 +409,7 @@ class YtDlpGui(QWidget):
         config = {
             "video_dir": self.video_dir,
             "audio_dir": self.audio_dir,
+            "last_save_dir": self.last_save_dir,
             "window_size": [self.width(), self.height()]
         }
         try:
