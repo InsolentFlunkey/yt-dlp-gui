@@ -32,6 +32,16 @@ python -m pip install -r requirements.txt
 ```
 
 ## Run
+Windows (recommended):
+
+```powershell
+.\start_yt-dlp_gui.ps1
+```
+
+Or double-click:
+
+- `start_yt-dlp_gui.cmd`
+
 Using uv:
 ```bash
 uv run python yt_dlp_gui.py

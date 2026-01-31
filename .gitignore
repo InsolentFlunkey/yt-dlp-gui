@@ -1,6 +1,6 @@
 #  App ignore
 downloads/
-yt_dlp_gui_config.json
+app_config.json
 
 #  Venv ignore
 .venv/
