@@ -4,6 +4,7 @@ import json
 import os
 import urllib.request
 import shutil
+from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QTextEdit, QLabel, QFileDialog, QCheckBox, QComboBox, QDialog, QMessageBox
@@ -14,6 +15,21 @@ from PySide6.QtGui import QPalette, QDesktopServices
 CONFIG_FILE = "app_config.json"
 OPEN_FOLDER_DIALOG_TITLE = "Open folder"
 OPEN_LAST_SAVE_LOCATION_TEXT = "Open last save location"
+SAVE_LOG_DIALOG_TITLE = "Save log"
+PREFERRED_JS_RUNTIMES = ("node", "deno")
+
+
+def get_yt_dlp_command():
+    # Running yt-dlp through the active interpreter keeps the GUI on the same
+    # venv-managed version that the launcher installs and updates.
+    return [sys.executable, "-m", "yt_dlp"]
+
+
+def get_js_runtime_args():
+    for runtime in PREFERRED_JS_RUNTIMES:
+        if shutil.which(runtime):
+            return ["--js-runtimes", runtime, "--remote-components", "ejs:github"], runtime
+    return [], None
 
 class DownloadWorker(QObject):
     output = Signal(str)
@@ -29,19 +45,26 @@ class DownloadWorker(QObject):
         self.cookies_file = cookies_file
 
     def run(self):
+        base_cmd = get_yt_dlp_command()
+        js_runtime_args, js_runtime = get_js_runtime_args()
         if self.audio_only:
             download_dir = self.audio_dir
-            cmd = [
-                "yt-dlp", "-x", "--audio-format", "mp3",
+            cmd = base_cmd + [
+                "-x", "--audio-format", "mp3",
                 "-P", download_dir
             ]
             self.output.emit(f"Starting audio download: {self.url}\nDownload directory: {download_dir}")
         else:
             download_dir = self.video_dir
-            cmd = [
-                "yt-dlp", "-P", download_dir
+            cmd = base_cmd + [
+                "-P", download_dir
             ]
             self.output.emit(f"Starting video download: {self.url}\nDownload directory: {download_dir}")
+        if js_runtime_args:
+            cmd.extend(js_runtime_args)
+            self.output.emit(f"Using JavaScript runtime: {js_runtime}")
+        else:
+            self.output.emit("No supported JavaScript runtime found on PATH. YouTube may warn and some formats may be missing.")
         if self.cookies_file:
             cmd.extend(["--cookies", self.cookies_file])
             self.output.emit(f"Using cookies file: {self.cookies_file}")
@@ -113,6 +136,7 @@ class YtDlpGui(QWidget):
         self.audio_dir = os.path.expanduser("~")
         self.last_save_dir = ""
         self.cookies_file_path = ""
+        _, self.detected_js_runtime = get_js_runtime_args()
         self.load_config()
 
         # Layouts
@@ -123,6 +147,7 @@ class YtDlpGui(QWidget):
         override_layout = QHBoxLayout()
         cookies_layout = QHBoxLayout()
         cookies_file_layout = QHBoxLayout()
+        log_actions_layout = QHBoxLayout()
         updates_layout = QHBoxLayout()
 
         # URL input
@@ -186,6 +211,21 @@ class YtDlpGui(QWidget):
         self.status_display = QTextEdit()
         self.status_display.setReadOnly(True)
         self.status_display.setPlaceholderText("Status and output will appear here...")
+        self.status_display.textChanged.connect(self._update_log_action_buttons)
+
+        # JS runtime status and log actions
+        self.js_runtime_label = QLabel()
+        self.js_runtime_label.setToolTip("Shows whether a JavaScript runtime is available for yt-dlp's YouTube challenge solver.")
+        self.copy_log_btn = QPushButton("Copy Log")
+        self.copy_log_btn.clicked.connect(self.copy_log_to_clipboard)
+        self.copy_log_btn.setToolTip("Copy the full log output to the clipboard.")
+        self.save_log_btn = QPushButton("Save Log")
+        self.save_log_btn.clicked.connect(self.save_log_to_file)
+        self.save_log_btn.setToolTip("Save the full log output to a text file.")
+        log_actions_layout.addWidget(self.js_runtime_label)
+        log_actions_layout.addStretch()
+        log_actions_layout.addWidget(self.copy_log_btn)
+        log_actions_layout.addWidget(self.save_log_btn)
 
         # Open last save location button (centered at bottom; enabled only after first save)
         self.open_last_save_btn = QPushButton(OPEN_LAST_SAVE_LOCATION_TEXT)
@@ -243,12 +283,16 @@ class YtDlpGui(QWidget):
         main_layout.addLayout(cookies_file_layout)
         main_layout.addLayout(video_dir_layout)
         main_layout.addLayout(audio_dir_layout)
+        main_layout.addLayout(log_actions_layout)
         main_layout.addWidget(self.status_display)
         main_layout.addLayout(updates_layout)
         self.setLayout(main_layout)
 
         # Apply initial enabled/disabled state for the last-save button
         self._update_last_save_button_state()
+        self._update_js_runtime_label()
+        self._update_log_action_buttons()
+        self.status_display.append(self._get_js_runtime_message())
 
         # Restore window size if available
         if hasattr(self, 'window_size'):
@@ -271,6 +315,35 @@ class YtDlpGui(QWidget):
     def paste_from_clipboard(self):
         clipboard = QApplication.clipboard()
         self.url_input.setText(clipboard.text())
+
+    def copy_log_to_clipboard(self):
+        log_text = self.status_display.toPlainText().strip()
+        if not log_text:
+            QMessageBox.information(self, "Copy log", "There is no log output to copy yet.")
+            return
+        QApplication.clipboard().setText(log_text)
+        self.status_display.append("Log copied to clipboard.")
+
+    def save_log_to_file(self):
+        log_text = self.status_display.toPlainText().strip()
+        if not log_text:
+            QMessageBox.information(self, SAVE_LOG_DIALOG_TITLE, "There is no log output to save yet.")
+            return
+        default_name = f"yt-dlp-gui-log-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            SAVE_LOG_DIALOG_TITLE,
+            os.path.join(os.getcwd(), default_name),
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not file_path:
+            return
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(log_text + "\n")
+            self.status_display.append(f"Log saved to: {file_path}")
+        except Exception as e:
+            QMessageBox.warning(self, SAVE_LOG_DIALOG_TITLE, f"Could not save log:\n{e}")
 
     def choose_video_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Video Download Directory", self.video_dir)
@@ -299,6 +372,22 @@ class YtDlpGui(QWidget):
     def _update_last_save_button_state(self):
         enabled = bool((self.last_save_dir or "").strip()) and os.path.isdir(self.last_save_dir)
         self.open_last_save_btn.setEnabled(enabled)
+
+    def _update_js_runtime_label(self):
+        if self.detected_js_runtime:
+            self.js_runtime_label.setText(f"JavaScript runtime: {self.detected_js_runtime}")
+        else:
+            self.js_runtime_label.setText("JavaScript runtime: not found")
+
+    def _get_js_runtime_message(self):
+        if self.detected_js_runtime:
+            return f"JavaScript runtime available: {self.detected_js_runtime}. YouTube challenge solving is enabled."
+        return "No supported JavaScript runtime found on PATH. YouTube may warn and some formats may be missing."
+
+    def _update_log_action_buttons(self):
+        has_log = bool(self.status_display.toPlainText().strip())
+        self.copy_log_btn.setEnabled(has_log)
+        self.save_log_btn.setEnabled(has_log)
 
     def _resolve_download_dirs(self, audio_only: bool, video_dir: str, audio_dir: str, override_save: bool):
         if not override_save:
@@ -365,7 +454,7 @@ class YtDlpGui(QWidget):
 
     def check_for_updates(self):
         try:
-            current = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True)
+            current = subprocess.run(get_yt_dlp_command() + ["--version"], capture_output=True, text=True)
             current_version = current.stdout.strip() or current.stderr.strip()
             if current.returncode != 0:
                 self.status_display.append(f"Could not determine current version. Output: {current_version}")

@@ -11,6 +11,8 @@ A simple, user-friendly graphical interface for [yt-dlp](https://github.com/yt-d
   - Use cookies from browser (with optional profile)
   - Use cookies file (Netscape cookies.txt)
 - Responsive UI with real-time yt-dlp output (runs work in a background thread)
+- Startup JavaScript runtime status for YouTube challenge solving
+- Log actions: copy the full log to the clipboard or save it to a text file
 - Persistent settings: window size, video directory, audio directory (stored in `yt_dlp_gui_config.json`)
 - Check for updates: "Check for yt-dlp updates" button
 - Helpful tooltips. Tip shown in-app: "Hover over items marked with '(i)' for more information."
@@ -19,6 +21,7 @@ A simple, user-friendly graphical interface for [yt-dlp](https://github.com/yt-d
 - Python 3.9+
 - ffmpeg available on PATH (required for muxing and audio extraction)
 - yt-dlp installed (the app can invoke `yt-dlp` on PATH)
+- For best YouTube compatibility, install `node` or `deno` on PATH so yt-dlp can run its JavaScript challenge solver
 
 ## Setup
 Using uv (recommended):
@@ -62,9 +65,12 @@ python yt_dlp_gui.py
      - How to create: install a cookies exporter extension in your browser; while logged in, open the site’s page and export cookies as Netscape `cookies.txt`.
 5. Click Download. Status and yt-dlp output will stream in the log area.
 6. Use "Check for yt-dlp updates" to see if a newer yt-dlp release is available, with suggested upgrade commands.
+7. Use the JavaScript runtime status line to confirm whether enhanced YouTube extraction support is available.
+8. Use "Copy Log" to share troubleshooting output quickly, or "Save Log" to export it to a text file.
 
 ## Troubleshooting
 - Missing ffmpeg: install it and ensure `ffmpeg` is on PATH.
+- YouTube warns about missing JavaScript runtime: install `node` or `deno` and restart the app. The GUI will automatically enable the runtime for yt-dlp when it is available.
 - Login required: supply cookies (browser/profile or `cookies.txt`).
 - Browser cookie DB locked: fully close the browser, or use the cookies file method.
 - Authorization/403 or geo errors: these are site-specific; cookies or a different region may be required. Some protected/DRM content cannot be downloaded.
